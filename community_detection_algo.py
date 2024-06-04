@@ -1,152 +1,137 @@
 import numpy as np
-from scipy import sparse 
-import networkx as nx 
-import matplotlib.pyplot as plt
+from scipy import sparse
+import traceback
+import pandas as pd
 
-#Function to create an ajacency matrix for testing the code
-def create_test_network(n):
-    A=np.random.randint(0,2,size=(n,n))
-    np.fill_diagonal(A,0) #No self-loops
-    return A
-
-def calculate_sign(vectors,values):
-#This function is for calculating the value of vector "s" which tell us in which of the two groups does the node belong to by giving it a charge
+def calculate_sign(vectors, values):
     if values > 0:
-        s=sparse.csc_matrix([[1 if u_1_i > 0 else -1] for u_1_i in vectors])
+        s = sparse.csc_matrix(np.sign(vectors).reshape(-1, 1))
+    else:
+        s = None
     return s
 
 def eigen_calculations(B):
-#This function is used for calculating the eignevectors and eigenvalues of the vector "B" which is equal to "A_ij - k_ik_j /2m"
-    B2= B + B.T
-    #print("This is the value of B")
-    #print(B)
-    values,vectors=np.linalg.eigh(B2)
-    #Sort in descending order
-    sorted_indices=np.argsort(values)[::-1]
-    sorted_values=values[sorted_indices]
-    print("Value of sorted matrix")
-    print(sorted_values)
-    max_eigenvalue=sorted_values[0]
-    print("This is the eigenvalue")
-    print(max_eigenvalue)
-    sorted_vectors=vectors[:,sorted_indices]
-    s=calculate_sign(sorted_vectors[:,0],sorted_values[0])
-    return sorted_values,sorted_vectors,s
+    B2 = B + B.T
+    values, vectors = np.linalg.eigh(B2)
+    sorted_indices = np.argsort(values)[::-1]
+    sorted_values = values[sorted_indices]
+    sorted_vectors = vectors[:, sorted_indices]
+    s = calculate_sign(sorted_vectors[:, 0], sorted_values[0]) if sorted_values.size > 0 else None
+    return sorted_values, sorted_vectors, s
 
 def calculate_modularity(A):
-#This function is used for calculating the B vector from the given adjacency matrix
-   # print("This is the value of calc mod ")
-   # print(A)
-    k_in=np.sum(A,axis=0)
-    k_out=np.sum(A,axis=1)
-    L=np.sum(A)
-    #print("Value of in , out , total edges")
-    #print(k_in,k_out,L)
-    #for Undirected Networks
-    B=A - np.outer(k_in,k_out) / (2*L)
-    #for directed Networks
-    #B = A - np.outer(k_in,k_out) / L
-    eigenvalues,eigenvectors,s=eigen_calculations(B)
-    s_array=s.toarray().flatten()
-    #Q here is the modularity it tell us whether we can divide this network or not
-    Q=np.sum(((np.dot(eigenvectors.T,s_array)) ** 2) * eigenvalues)
-    Q=Q/(4 * L) 
-    #print("This is the valuof modularity")
-    #print(Q)
-    #print("This is the eigenvalue")
-    #print(eigenvalues)
-    return Q,eigenvalues,eigenvectors,s_array
-
-def delta_q(A_positive, A_negative):
-    deltaq_add = 0  # Initialize deltaq_add
-    if A_positive.size > 0:
-        qp, eigenvalues_pos, eigenvectors_pos, s_array_pos = calculate_modularity(A_positive)
-        if eigenvalues_pos[0] > 0:
-            if qp > 0:
-                deltaq_add += qp
-                deltaq_add += partition_subnetworks(s_array_pos, A_positive)
-            else:
-                return 0
-        else:
-            return 0
-
-    else:
-        return 0
-    if A_negative.size > 0:
-        qn, eigenvalues_neg, eigenvectors_neg, s_array_neg = calculate_modularity(A_negative)
-        if eigenvalues_neg[0] > 0:
-            if qn > 0:
-                deltaq_add += qn
-                deltaq_add += partition_subnetworks(s_array_neg, A_negative)
-            else:
-                return 0
-        else:
-            return 0
-    else:
-        return 0
-    return deltaq_add
+    k_in = np.sum(A, axis=0)
+    k_out = np.sum(A, axis=1)
+    L = np.sum(A)
+    B = A - np.outer(k_in, k_out) / (2 * L)
+    eigenvalues, eigenvectors, s = eigen_calculations(B)
+    s_array = s.toarray().flatten() if s is not None else np.array([])
+    Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
+    Q = Q / (4 * L)
+    return Q, eigenvalues, eigenvectors, s_array, B, L
 
 def partition_subnetworks(s_array, A):
     positive_indices = np.where(s_array == 1)[0]
     negative_indices = np.where(s_array == -1)[0]
     A_positive = A[np.ix_(positive_indices, positive_indices)]
     A_negative = A[np.ix_(negative_indices, negative_indices)]
-    if A_positive.size <= 0 and A_negative.size <= 0:
+    return A_positive, A_negative, positive_indices, negative_indices
+
+def calculate_delta_modularity(B, L, indices):
+    B_subgraph = B[indices][:, indices]
+    B_g = B_subgraph - sparse.diags(B[indices].sum(axis=1))
+    B_g = np.array(B_g)
+    eigenvalues, eigenvectors, s = eigen_calculations(B_g)
+    if s is None:
         return 0
-    return delta_q(A_positive, A_negative)
+    s_array = s.toarray().flatten() if s is not None else np.array([]).reshape(-1, 1)
+    Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
+    Q = Q / (4 * L)
+    return Q
 
-#def delta_q(A_positive,A_negative):
-#    #print("This is the value of A positive")
-#    if A_positive.size > 0:
-#      qp, eigenvalues_pos, eigenvectors_pos, s_array_pos = calculate_modularity(A_positive)
-#      if qp > 0:
-#            deltaq_add += qp
-#            deltaq_add += partition_subnetworks(s_array_pos, A_positive)
-#    if A_negative.size > 0:
-#        qn, eigenvalues_neg, eigenvectors_neg, s_array_neg = calculate_modularity(A_negative)
-#        if qn > 0:
-#            deltaq_add += qn
-#            deltaq_add += partition_subnetworks(s_array_neg, A_negative)
-#    #print(A_positive)
-#    A1=A_positive.copy()
-#    A2=A_negative.copy()
-#    print("This is the value of the copied A neg matrix")
-#    print(A2)
-#    qp,eigenvalues_pos,eigenvectors_pos,s_array_pos=calculate_modularity(A1)
-#    qn,eigenvalues_neg,eigenvectors_neg,s_array_neg=calculate_modularity(A2)
-#
-#    if eigenvectors_pos[0]:
-#        if qp > 0:
-#            deltaq_add+=qp
-#            partition_subnetworks(s_array_pos,A1)
-#    if eigenvectors_neg[0]:
-#        if qn > 0:
-#            deltaq_add+=qn
-#            partition_subnetworks(s_array_neg,A2)
+def recursive_modularity(A, labels, depth=0, result_labels_index=1, result_labels=None):
+    if result_labels is None:
+        result_labels = {}
+    
+    try:
+        print(f"Iteration Number: {depth}")
+        modularity = 0
+        if depth == 0:
+            init_mod, eigenvalues, eigenvectors, s_array, B_init, numberofedges = calculate_modularity(A)
+            modularity += init_mod
+        else:
+            init_mod, eigenvalues, eigenvectors, s_array, B_init, numberofedges = calculate_modularity(A)
+        
+        print("Current Modularity:", modularity)
+        
+        if np.all(s_array == 1) or np.all(s_array == -1):
+            print("Stopping the recurrence as s_array is homogenous")
+            result_labels[result_labels_index] = labels
+            return modularity, result_labels
+        
+        if eigenvalues.size > 0 and eigenvalues[0] > 0:
+            A_pos, A_neg, pos_indices, neg_indices = partition_subnetworks(s_array, A)
+            deltaq_pos = calculate_delta_modularity(B_init, numberofedges, pos_indices)
+            deltaq_neg = calculate_delta_modularity(B_init, numberofedges, neg_indices)
 
-#    return deltaq_add
+            print("This is the value of delta positive")
+            print(deltaq_pos)
+            print("This is the value of delta neg")
+            print(deltaq_neg)
+            
+            labels_pos = [labels[i] for i in pos_indices]
+            labels_neg = [labels[i] for i in neg_indices]
+            
+            if deltaq_pos > 0:
+                modularity += deltaq_pos
+                recur_q_pos, result_labels = recursive_modularity(A_pos, labels_pos, depth + 1, result_labels_index, result_labels)
+                modularity += recur_q_pos
+                result_labels_index = max(result_labels.keys()) + 1
+            else:
+                print("Here are the labels")
+                print(labels_pos)
+                result_labels[result_labels_index] = labels_pos
+                result_labels_index += 1
+                
+            if deltaq_neg > 0:
+                modularity += deltaq_neg
+                recur_q_neg, result_labels = recursive_modularity(A_neg, labels_neg, depth + 1, result_labels_index, result_labels)
+                modularity += recur_q_neg
+            else:
+                print("Here are the labels ")
+                print(labels_neg)
+                result_labels[result_labels_index] = labels_neg
 
-#def partition_subnetworks(s_array,A):
-#    positive_indices = np.where(s_array == 1)[0]
-#    negative_indices = np.where(s_array == -1)[0]
-#    A_positive = A[np.ix_(positive_indices, positive_indices)]
-#    A_negative = A[np.ix_(negative_indices, negative_indices)]
-#   #print("This is the value of the negative variable")
-#    #print(A_negative)
-#    get_deltaq=delta_q(A_positive,A_negative)
-#    #qp,eigenvalues_pos,eigenvectors_pos,s_array_pos=calculate_modularity(A_positive,lamda_=1)
-#    #qn,eigenvalues_neg,eigenvectors_neg,s_array_neg=calculate_modularity(A_negative,lamda_=1)
-#    return get_deltaq
+        else:
+            result_labels[result_labels_index] = labels
+
+        return modularity, result_labels
+
+    except Exception as e:
+        print(f"An error occurred during recursion at depth {depth}: {e}")
+        traceback.print_exc()
+        raise
+
 def main():
-    N=10
-    A=create_test_network(N)
-    Q,eigenvalues,eigenvectors,s_array=calculate_modularity(A)
-    if eigenvalues[0] > 0 :
-        deltaq_value=partition_subnetworks(s_array,A)
-        print("This is the final modularity Value")
-        Q=Q+deltaq_value
-    else:
-        print("This network is not divisible")
+    try:
+        file_path = r'E:\Summer_Project\Network_Data\connectome_data_anand_pathak\adj_matrix_humanbrain.csv'
+        adj_matrix_df = pd.read_csv(file_path)
 
-if __name__=="__main__":
+        labels = adj_matrix_df.columns[1:].tolist()
+        A = adj_matrix_df.iloc[:, 1:].values
+        
+        final_modularity, final_label_division = recursive_modularity(A, labels)
+        print("This is the final Modularity:", final_modularity)
+        
+        print("Here are the partitions")
+        for subgraph_key, subgraph_labels in final_label_division.items():
+            print(f"Subgraph {subgraph_key}: {subgraph_labels}")
+
+    except IOError as e:
+        print(f"Error reading file: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        traceback.print_exc()
+
+if __name__ == "__main__":
     main()
