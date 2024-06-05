@@ -26,7 +26,7 @@ def calculate_modularity(A):
     B = A - np.outer(k_in, k_out) / (2 * L)
     eigenvalues, eigenvectors, s = eigen_calculations(B)
     s_array = s.toarray().flatten() if s is not None else np.array([])
-    Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
+    Q = np.sum(((np.dot(eigenvectors[:, 0].T, s_array)) ** 2) * eigenvalues[0])
     Q = Q / (4 * L)
     return Q, eigenvalues, eigenvectors, s_array, B, L
 
@@ -45,7 +45,7 @@ def calculate_delta_modularity(B, L, indices):
     if s is None:
         return 0
     s_array = s.toarray().flatten() if s is not None else np.array([]).reshape(-1, 1)
-    Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
+    Q = np.sum(((np.dot(eigenvectors[:, 0].T, s_array)) ** 2) * eigenvalues[0])
     Q = Q / (4 * L)
     return Q
 
