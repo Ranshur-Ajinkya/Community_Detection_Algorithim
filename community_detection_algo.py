@@ -39,13 +39,24 @@ def partition_subnetworks(s_array, A):
 
 def calculate_delta_modularity(B, L, indices):
     B_subgraph = B[indices][:, indices]
-    B_g = B_subgraph - sparse.diags(B[indices].sum(axis=1))
+    # B_g = B_subgraph - sparse.diags((B[indices].sum(axis=1)+B[indices].sum(axis=0)))
+    # Step 2: Calculate the degree sum vector for the subgraph
+    degree_sum = 0.5 * (B_subgraph.sum(axis=1) + B_subgraph.sum(axis=0))  # A1 converts to 1D array
+
+    # Step 3: Create the diagonal matrix of the degree sums
+    D = sparse.diags(degree_sum)
+
+    # Step 4: Modify the subgraph
+    B_g = B_subgraph
     B_g = np.array(B_g)
+    print("******************")
+    print("This is the value of B_g",B_g)
+    print("******************")
     eigenvalues, eigenvectors, s = eigen_calculations(B_g)
     if s is None:
         return 0
     s_array = s.toarray().flatten() if s is not None else np.array([]).reshape(-1, 1)
-    Q = np.sum(((np.dot(eigenvectors[:, 0].T, s_array)) ** 2) * eigenvalues[0])
+    Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
     Q = Q / (4 * L)
     return Q
 
@@ -114,7 +125,9 @@ def recursive_modularity(A, labels, depth=0, result_labels_index=1, result_label
 
 def main():
     try:
-        file_path = r'E:\Summer_Project\Network_Data\connectome_data_anand_pathak\adj_matrix_humanbrain.csv'
+        # file_path = r'E:\Summer_Project\Network_Data\connectome_data_anand_pathak\adj_matrix_humanbrain.csv'
+        # file_path=r'/workspaces/Community_Detection_Algorithim/adj_matrix_with_labels.csv'
+        file_path=r'/workspaces/Community_Detection_Algorithim/adj_matrix_humanbrain.csv'
         adj_matrix_df = pd.read_csv(file_path)
 
         labels = adj_matrix_df.columns[1:].tolist()
