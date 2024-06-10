@@ -23,10 +23,10 @@ def calculate_modularity(A):
     k_in = np.sum(A, axis=0)
     k_out = np.sum(A, axis=1)
     L = np.sum(A)
-    B = A - np.outer(k_in, k_out) / (2 * L)
+    B = A - np.outer(k_in, k_out) / (L)
     eigenvalues, eigenvectors, s = eigen_calculations(B)
     s_array = s.toarray().flatten() if s is not None else np.array([])
-    Q = np.sum(((np.dot(eigenvectors[:, 0].T, s_array)) ** 2) * eigenvalues[0])
+    Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
     Q = Q / (4 * L)
     return Q, eigenvalues, eigenvectors, s_array, B, L
 
@@ -37,33 +37,34 @@ def partition_subnetworks(s_array, A):
     A_negative = A[np.ix_(negative_indices, negative_indices)]
     return A_positive, A_negative, positive_indices, negative_indices
 
-def calculate_delta_modularity(B, L, indices):
-    B_subgraph = B[indices][:, indices]
-    # B_g = B_subgraph - sparse.diags((B[indices].sum(axis=1)+B[indices].sum(axis=0)))
-    # Step 2: Calculate the degree sum vector for the subgraph
-    degree_sum = 0.5 * (B_subgraph.sum(axis=1) + B_subgraph.sum(axis=0))  # A1 converts to 1D array
-
-    # Step 3: Create the diagonal matrix of the degree sums
-    D = sparse.diags(degree_sum)
-
-    # Step 4: Modify the subgraph
-    B_g = B_subgraph
-    B_g = np.array(B_g)
-    print("******************")
-    print("This is the value of B_g",B_g)
-    print("******************")
-    eigenvalues, eigenvectors, s = eigen_calculations(B_g)
-    if s is None:
-        return 0
-    s_array = s.toarray().flatten() if s is not None else np.array([]).reshape(-1, 1)
+def calculate_delta_modularity(A_mod):
+    k_in = np.sum(A_mod, axis=0)
+    k_out = np.sum(A_mod, axis=1)
+    L = np.sum(A_mod)
+    B = A_mod - np.outer(k_in, k_out) / (L)
+    eigenvalues, eigenvectors, s = eigen_calculations(B)
+    s_array = s.toarray().flatten() if s is not None else np.array([])
     Q = np.sum(((np.dot(eigenvectors.T, s_array)) ** 2) * eigenvalues)
     Q = Q / (4 * L)
+
     return Q
 
-def recursive_modularity(A, labels, depth=0, result_labels_index=1, result_labels=None):
+def recursive_modularity(A, labels, depth=0,result_labels_index=1,result_labels=None):
+    """
+    Recursively calculate modularity and partition the network into communities.
+
+    Args:
+        A (numpy.ndarray): The adjacency matrix.
+        labels (list): The labels associated with the nodes.
+        depth (int, optional): The current depth of recursion. Default is 0.
+        result_labels (dict, optional): A dictionary to store the labels of the communities. Default is None.
+
+    Returns:
+        tuple: A tuple containing the final modularity value and a dictionary of community labels.
+    """
     if result_labels is None:
         result_labels = {}
-    
+
     try:
         print(f"Iteration Number: {depth}")
         modularity = 0
@@ -71,50 +72,64 @@ def recursive_modularity(A, labels, depth=0, result_labels_index=1, result_label
             init_mod, eigenvalues, eigenvectors, s_array, B_init, numberofedges = calculate_modularity(A)
             modularity += init_mod
         else:
-            init_mod, eigenvalues, eigenvectors, s_array, B_init, numberofedges = calculate_modularity(A)
-        
-        print("Current Modularity:", modularity)
-        
+            init_mod, eigenvalues, _, s_array, _, _ = calculate_modularity(A)
+
+        print(f"Current Modularity: {modularity}")
+
         if np.all(s_array == 1) or np.all(s_array == -1):
             print("Stopping the recurrence as s_array is homogenous")
-            result_labels[result_labels_index] = labels
+            result_labels[depth] = labels
             return modularity, result_labels
-        
+
         if eigenvalues.size > 0 and eigenvalues[0] > 0:
             A_pos, A_neg, pos_indices, neg_indices = partition_subnetworks(s_array, A)
-            deltaq_pos = calculate_delta_modularity(B_init, numberofedges, pos_indices)
-            deltaq_neg = calculate_delta_modularity(B_init, numberofedges, neg_indices)
-
-            print("This is the value of delta positive")
-            print(deltaq_pos)
-            print("This is the value of delta neg")
-            print(deltaq_neg)
-            
             labels_pos = [labels[i] for i in pos_indices]
             labels_neg = [labels[i] for i in neg_indices]
-            
-            if deltaq_pos > 0:
-                modularity += deltaq_pos
-                recur_q_pos, result_labels = recursive_modularity(A_pos, labels_pos, depth + 1, result_labels_index, result_labels)
-                modularity += recur_q_pos
-                result_labels_index = max(result_labels.keys()) + 1
+            print("*****************")
+            print("These are the labels Pos",labels_pos)
+            print("These are the labels Neg",labels_neg)
+            print("*****************")
+
+            if depth == 0:
+                recur_q_pos, result_labels = recursive_modularity(A_pos, labels_pos, depth + 1, result_labels)
+                recur_q_neg, result_labels = recursive_modularity(A_neg, labels_neg, depth + 1, result_labels)
+                modularity += recur_q_pos + recur_q_neg
             else:
-                print("Here are the labels")
-                print(labels_pos)
-                result_labels[result_labels_index] = labels_pos
-                result_labels_index += 1
-                
-            if deltaq_neg > 0:
-                modularity += deltaq_neg
-                recur_q_neg, result_labels = recursive_modularity(A_neg, labels_neg, depth + 1, result_labels_index, result_labels)
-                modularity += recur_q_neg
-            else:
-                print("Here are the labels ")
-                print(labels_neg)
-                result_labels[result_labels_index] = labels_neg
+                deltaq_pos = calculate_delta_modularity(A_pos)
+                deltaq_neg = calculate_delta_modularity(A_neg)
+                Q_new = deltaq_pos + deltaq_neg
+                delta_mod = init_mod - Q_new
+
+                if delta_mod > 0:
+                    if deltaq_pos > 0:
+                        modularity += deltaq_pos
+                        recur_q_pos, result_labels = recursive_modularity(A_pos, labels_pos, depth + 1, result_labels_index, result_labels)
+                        modularity += recur_q_pos
+
+
+                        result_labels_index = max(result_labels.keys()) + 1
+                    else:
+                        print("Here are the labels")
+                        print(labels_pos)
+                        result_labels[result_labels_index] = labels_pos
+                        result_labels_index += 1
+                        
+                    if deltaq_neg > 0:
+                        modularity += deltaq_neg
+                        recur_q_neg, result_labels = recursive_modularity(A_neg, labels_neg, depth + 1, result_labels_index, result_labels)
+                        modularity += recur_q_neg
+                    else:
+                        print("Here are the labels ")
+                        print(labels_neg)
+                        result_labels[result_labels_index] = labels_neg
+                else:
+                    result_labels[depth] = labels_pos
+                    result_labels[depth] = labels_neg
+                    
+                    
 
         else:
-            result_labels[result_labels_index] = labels
+            result_labels[depth] = labels
 
         return modularity, result_labels
 
